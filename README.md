@@ -1,4 +1,4 @@
-# TinyGPT — a ~5M-parameter decoder-only Transformer trained on TinyStories
+# TBH — a ~5M-parameter decoder-only Transformer trained on TinyStories
 
 A minimal, from-scratch GPT-style language model in PyTorch. No HuggingFace
 `transformers` — the Transformer (attention, RoPE, RMSNorm, SwiGLU) is
