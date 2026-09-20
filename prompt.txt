@@ -1,0 +1,51 @@
+Context: ~/Desktop/PROJECTS/Ai_v2 is a ~5.2M-param decoder-only GPT (TinyGPT: 4 layers,
+d_model 256, 8 heads, RoPE, RMSNorm, SwiGLU, context 256, tied embeddings) trained
+from scratch on TinyStories. It was just extended into a chat model. Understand the
+state below before touching anything.
+
+CHAT FORMAT (must stay consistent everywhere):
+  <|user|>{user_message}<|assistant|>{assistant_reply}<|end|>
+  3 new special tokens were appended to the BPE vocab: 4096 -> 4099 (no retraining).
+
+NEW FILES:
+  - add_chat_tokens.py     loads data/tinystories/tokenizer.json, adds <|user|>,
+                           <|assistant|>, <|end|>, saves data/chat/tokenizer_chat.json
+  - download_chat_data.py  streams roneneldan/TinyStoriesInstruct from HuggingFace and
+                           parses its plain-text blocks (Features/Words/Summary/Story
+                           lines ending in <|endoftext|>) into
+                           {"user": instruction, "assistant": story} pairs ->
+                           data/chat/raw_chat.json (50,000 pairs)
+  - format_chat.py         collapses whitespace, skips empty / non-English /
+                           >250-token conversations (kept 28,038, avg 211 tokens) ->
+                           data/chat/formatted_chat.txt
+  - tokenize_chat.py       encodes with tokenizer_chat.json, shuffles conversations
+                           (seed 42), 95/5 split -> uint16 npy files
+  - run_all.py             runs the 4 scripts above in order, prints a final summary
+
+MODIFIED FILES (pre-change copies saved as *.bak):
+  - train.py   added --resume and --vocab_size. On resume with mismatched embedding
+               shape it resizes: copies overlapping rows, random-inits (std=0.02) the
+               new rows, prints "Resized embedding: old -> new", and starts a FRESH
+               optimizer/schedule (--epochs counts new epochs). Matching-vocab resume
+               keeps old behavior: restores optimizer + LR schedule + epoch/step, and
+               --epochs is the target TOTAL epoch count. Tokenizer lookup now falls
+               back to <data_dir>/tokenizer_chat.json.
+  - sample.py  added --chat: interactive loop rendering the full transcript in the chat
+               format, keeps history up to context_length (256, drops oldest turns),
+               stops each reply at <|end|>, defaults to the chat tokenizer. The old
+               --prompt mode is unchanged (still uses the TinyStories tokenizer).
+  - dataset.py prepare_tokens() now also finds data/chat/chat_{train,val}_tokens.npy
+               ("val", not "validation") when --data_dir data/chat is used.
+  - README.md  documents the chat fine-tuning pipeline.
+  - model.py   NOT changed: vocab_size was already a ModelConfig parameter.
+
+CURRENT ARTIFACTS (data/chat/): tokenizer_chat.json (vocab 4099), raw_chat.json,
+formatted_chat.txt, chat_train_tokens.npy (5,619,462 tokens),
+chat_val_tokens.npy (296,163 tokens). Model is CPU-only (torch 2.14+cpu,
+2-core i7-4xxxU) at ~8.6 s/step with batch 32.
+
+NEXT STEP (not yet run):
+  python train.py --data_dir data/chat --resume checkpoints/latest.pt \
+      --vocab_size 4099 --epochs 2 --lr 1e-4 --batch_size 32 --warmup_steps 100
+then chat with:
+  python sample.py --checkpoint checkpoints/final.pt --chat

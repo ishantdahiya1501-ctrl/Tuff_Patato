@@ -44,13 +44,6 @@ def tokenize_texts(tokenizer, texts, total=None, desc="tokenizing") -> np.ndarra
 def prepare_tokens(data_dir, tokenizer_path, split="train", max_stories=None, force=False):
     """Return the packed token array for a split, tokenizing + caching on first use."""
     cache_path = os.path.join(data_dir, f"{split}_tokens.npy")
-    if not os.path.exists(cache_path):
-        # Chat fine-tuning splits are stored with a `chat_` prefix and use
-        # "val" instead of "validation" (tokenize_chat.py).
-        chat_split = "val" if split == "validation" else split
-        chat_path = os.path.join(data_dir, f"chat_{chat_split}_tokens.npy")
-        if os.path.exists(chat_path):
-            cache_path = chat_path
     if os.path.exists(cache_path) and not force:
         tokens = np.load(cache_path, mmap_mode="r")
         print(f"Loaded cached tokens for '{split}': {len(tokens):,} tokens ({cache_path})")

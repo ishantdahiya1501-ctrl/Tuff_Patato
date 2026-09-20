@@ -4,11 +4,9 @@ A minimal, from-scratch GPT-style language model in PyTorch. No HuggingFace
 `transformers` — the Transformer (attention, RoPE, RMSNorm, SwiGLU) is
 implemented by hand in `model.py`. It is pretrained **only** on
 [`roneneldan/TinyStories`](https://huggingface.co/datasets/roneneldan/TinyStories)
-so it learns to tell simple, fluent children's stories. It also ships with an
-optional **chat fine-tuning path**: three special tokens (`<|user|>`,
-`<|assistant|>`, `<|end|>`), a data pipeline built on
-[`roneneldan/TinyStoriesInstruct`](https://huggingface.co/datasets/roneneldan/TinyStoriesInstruct),
-and an interactive `--chat` mode in `sample.py`.
+so it learns to tell simple, fluent children's stories. Chat fine-tuning can be
+added later; there is deliberately **no chat template or instruction tuning**
+in this repo.
 
 ## Architecture
 
@@ -33,13 +31,8 @@ and an interactive `--chat` mode in `sample.py`.
 - `model.py` — model definition (TinyGPT), RoPE, generation, checkpoint helper
 - `tokenizer.py` — train/load the 4096-vocab byte-level BPE tokenizer
 - `dataset.py` — tokenize TinyStories and cache as packed `.npy` token streams
-- `train.py` — training loop (AdamW, cosine schedule with warmup, AMP, checkpoints, `--resume` with embedding resize)
-- `sample.py` — generate text from a prompt (`--prompt`) or chat interactively (`--chat`)
-- `add_chat_tokens.py` — add `<|user|>`, `<|assistant|>`, `<|end|>` special tokens (no BPE retraining)
-- `download_chat_data.py` — download TinyStoriesInstruct instruction/story pairs
-- `format_chat.py` — format + filter conversations into the chat template
-- `tokenize_chat.py` — encode conversations into packed uint16 arrays (95/5 split)
-- `run_all.py` — run the whole chat data prep pipeline in order
+- `train.py` — training loop (AdamW, cosine schedule with warmup, AMP, checkpoints)
+- `sample.py` — generate text from a prompt using a checkpoint
 - `requirements.txt` — dependencies (torch, numpy, tokenizers, datasets, tqdm)
 
 ## Setup
@@ -83,60 +76,6 @@ Mixed precision is enabled automatically on CUDA (bf16 when supported, fp16
 with a GradScaler otherwise); CPU runs in fp32. Progress shows a live loss and
 LR; Ctrl-C saves `latest.pt` so you can stop safely.
 
-## Chat fine-tuning
-
-The pretrained model can be fine-tuned into a tiny chat model using the
-TinyStoriesInstruct dataset (instruction → story pairs), formatted as:
-
-```
-<|user|>{user_message}<|assistant|>{assistant_reply}<|end|>
-```
-
-One-time data prep (downloads ~50k conversations, filters to ≤250 tokens per
-conversation, and packs them into uint16 token arrays — takes a few minutes):
-
-```bash
-python run_all.py        # runs add_chat_tokens.py -> download_chat_data.py ->
-                         #      format_chat.py -> tokenize_chat.py
-```
-
-This produces `data/chat/`:
-
-| File | Contents |
-|------|----------|
-| `tokenizer_chat.json` | TinyStories BPE + 3 special tokens (vocab 4096 → **4099**) |
-| `raw_chat.json` | raw downloaded conversations |
-| `formatted_chat.txt` | one formatted conversation per line |
-| `chat_train_tokens.npy` / `chat_val_tokens.npy` | packed 95/5 token splits |
-
-Fine-tune from the pretrained checkpoint. When the checkpoint's embedding is
-smaller than the new vocab, `train.py` copies the overlapping rows and randomly
-initializes the 3 new ones (`Resized embedding: 4096 -> 4099`) and starts with
-a fresh optimizer:
-
-```bash
-python train.py --data_dir data/chat \
-    --resume checkpoints/latest.pt \
-    --vocab_size 4099 --epochs 2 --lr 1e-4 --batch_size 32
-```
-
-(`--data_dir data/chat` automatically picks up `chat_train_tokens.npy`,
-`chat_val_tokens.npy`, and `tokenizer_chat.json`. Resuming with a *matching*
-vocab keeps the old behavior: optimizer, LR schedule, and epoch/step counters
-are restored and `--epochs` is treated as the target total epoch count.)
-
-Then chat with it:
-
-```bash
-python sample.py --checkpoint checkpoints/final.pt --chat
-```
-
-`--chat` starts an interactive loop that renders the full transcript as
-`<|user|>…<|assistant|>…<|end|>` and drops the oldest turns once the history
-exceeds the 256-token context. It defaults to the chat tokenizer and stops each
-reply at `<|end|>`. The plain `--prompt "..."` mode still works exactly as
-before (including the original TinyStories tokenizer).
-
 ## Generating text
 
 ```bash
@@ -173,7 +112,4 @@ Delete the `data/` cache and rerun with `--force` if you change the tokenizer.
   unexpectedly slow.
 - Checkpoints store the full model config, so `sample.py` reconstructs the
   model without any extra flags.
-- Deliberately minimal: no RLHF, DPO, MoE, or other extras — the chat path is
-  plain supervised fine-tuning on a fixed template.
-- `.bak` backups (`train.py.bak`, `sample.py.bak`, `dataset.py.bak`,
-  `README.md.bak`) hold the pre-chat versions of the modified files.
+- Deliberately minimal: no RLHF, DPO, MoE, chat formatting, or other extras.
